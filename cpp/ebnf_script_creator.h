@@ -31,6 +31,16 @@ class EBNFScriptCreator {
   /*! \brief Constructor */
   EBNFScriptCreator() = default;
 
+  std::string AddCharBudgetRule(
+      const std::string& hint, const std::string& char_pattern, int min_chars, int max_chars
+  ) {
+    auto name = AllocateRuleName(hint);
+    auto header = name + "[min_chars=" + std::to_string(min_chars) +
+                  ",max_chars=" + std::to_string(max_chars) + "]";
+    rules_.emplace_back(header, char_pattern + "*");
+    return name;
+  }
+
   /*!
    * \brief Adds a new rule to the grammar with a suggested name
    * \param rule_name_hint Suggested name for the rule

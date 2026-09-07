@@ -185,6 +185,7 @@ class GrammarBuilder {
   void UpdateLookaheadAssertion(int32_t rule_id, int32_t lookahead_assertion_id);
 
   void UpdateLookaheadExact(int32_t rule_id, bool is_exact = true);
+  void UpdateCharBudget(int32_t rule_id, int32_t min_chars, int32_t max_chars);
 
   /*!
    * \brief Add a lookahead assertion to a rule referred by the given name. The lookahead

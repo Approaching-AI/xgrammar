@@ -461,6 +461,17 @@ class GrammarMatcher::Impl : public EarleyParser {
         tmp_accepted_bitset_(tokenizer_info_.GetVocabSize()) {
     XGRAMMAR_CHECK(!override_stop_tokens.has_value() || !override_stop_tokens->empty())
         << "The override_stop_tokens should not be empty";
+    for (int i = 0; i < grammar_->NumRules(); ++i) {
+      has_char_budget_ |= grammar_->GetRule(i).max_chars >= 0;
+    }
+    if (has_char_budget_) {
+      for (const auto& entry : tokenizer_info_.GetSortedDecodedVocab()) {
+        int chars = 0;
+        for (unsigned char byte : entry.second) chars += (byte & 0xc0) != 0x80;
+        token_codepoints_.push_back(chars);
+        max_token_codepoints_ = std::max(max_token_codepoints_, chars);
+      }
+    }
   }
 
   bool AcceptToken(int32_t token_id, bool debug_print = false);
@@ -527,6 +538,16 @@ class GrammarMatcher::Impl : public EarleyParser {
   std::vector<int> stop_token_ids_;
   bool terminate_without_stop_token_;
   std::deque<int> token_length_history;
+  bool has_char_budget_ = false;
+  int max_token_codepoints_ = 0;
+  std::vector<int32_t> token_codepoints_;
+
+  bool NeedsCharBudgetCheck(const ParserState& state) const {
+    if (!has_char_budget_ || !HasCharBudget(state)) return false;
+    const auto& rule = grammar_->GetRule(state.rule_id);
+    return rule.max_chars - state.repeat_count < max_token_codepoints_ ||
+           state.repeat_count < rule.min_chars;
+  }
 
   // Temporary data for FillNextTokenBitmask. They are stored here to avoid repeated allocation.
   DynamicBitset tmp_accepted_bitset_;
@@ -844,6 +865,7 @@ bool GrammarMatcher::Impl::FillNextTokenBitmask(
     XGRAMMAR_CHECK(adaptive_token_mask_it != adaptive_token_mask_cache.end()) << state;
     const auto& adaptive_token_mask = adaptive_token_mask_it->second;
     latest_states_with_masks.push_back(std::make_pair(state, adaptive_token_mask_it));
+    if (NeedsCharBudgetCheck(state)) continue;
     if (adaptive_token_mask.store_type == StoreType::kAcceptedBitset) {
       tmp_accepted_bitset_ |= adaptive_token_mask.accepted_bitset;
     } else if (adaptive_token_mask.store_type == StoreType::kAccepted) {
@@ -855,6 +877,55 @@ bool GrammarMatcher::Impl::FillNextTokenBitmask(
 
   for (const auto& [state, adaptive_token_mask_it] : latest_states_with_masks) {
     const auto& adaptive_token_mask = adaptive_token_mask_it->second;
+    if (NeedsCharBudgetCheck(state)) {
+      // Near a boundary, validate this state's contribution exactly. Other
+      // states still contribute their ordinary cached masks to the union.
+      PushOneStateToCheck(state);
+      const std::string* previous = nullptr;
+      int matched = 0;
+      size_t accept_index = 0, reject_index = 0, uncertain_index = 0;
+      const auto& budget_rule = grammar_->GetRule(state.rule_id);
+      int remaining = budget_rule.max_chars - state.repeat_count;
+      for (size_t token_index = 0; token_index < sorted_decoded_vocab.size(); ++token_index) {
+        const auto& [token_id, token] = sorted_decoded_vocab[token_index];
+        auto contains = [token_index](const std::vector<int32_t>& indices, size_t& cursor) {
+          while (cursor < indices.size() && indices[cursor] < static_cast<int32_t>(token_index))
+            ++cursor;
+          return cursor < indices.size() && indices[cursor] == static_cast<int32_t>(token_index);
+        };
+        bool uncertain = contains(adaptive_token_mask.uncertain_indices, uncertain_index);
+        bool accepted =
+            adaptive_token_mask.store_type == StoreType::kAcceptedBitset
+                ? adaptive_token_mask.accepted_bitset[token_id]
+            : adaptive_token_mask.store_type == StoreType::kAccepted
+                ? contains(adaptive_token_mask.accepted_indices, accept_index)
+                : !uncertain && !contains(adaptive_token_mask.rejected_indices, reject_index);
+        if (!accepted && !uncertain) continue;
+        if (accepted && state.repeat_count >= budget_rule.min_chars &&
+            token_codepoints_[token_index] <= remaining) {
+          tmp_accepted_bitset_.Set(token_id);
+          continue;
+        }
+        int common =
+            previous ? std::mismatch(token.begin(), token.end(), previous->begin(), previous->end())
+                               .first -
+                           token.begin()
+                     : 0;
+        if (common > matched) {
+          previous = &token;
+          continue;
+        }
+        PopLastStates(matched - common);
+        matched = common;
+        for (; matched < static_cast<int>(token.size()); ++matched) {
+          if (!Advance(static_cast<uint8_t>(token[matched]))) break;
+        }
+        if (matched == static_cast<int>(token.size())) tmp_accepted_bitset_.Set(token_id);
+        previous = &token;
+      }
+      PopLastStates(matched + 1);
+      continue;
+    }
 
     // For each ParserState, we will check every uncertain token and put them into the accepted or
     // rejected list.

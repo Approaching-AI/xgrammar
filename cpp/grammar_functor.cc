@@ -66,6 +66,7 @@ class SubGrammarAdderImpl : public GrammarMutator {
       cur_rule_name_ = new_rule_ids_names[i].second;
       auto new_body_expr_id = VisitExpr(rule.body_expr_id);
       builder_->UpdateRuleBody(new_rule_ids_names[i].first, new_body_expr_id);
+      builder_->UpdateCharBudget(new_rule_ids_names[i].first, rule.min_chars, rule.max_chars);
       auto new_lookahead_assertion_id = VisitLookaheadAssertion(rule.lookahead_assertion_id);
       builder_->UpdateLookaheadAssertion(new_rule_ids_names[i].first, new_lookahead_assertion_id);
     }
@@ -271,6 +272,7 @@ class StructureNormalizerImpl : public GrammarMutator {
       cur_rule_name_ = rule.name;
       auto new_body_expr_id = VisitRuleBody(grammar_expr);
       builder_->UpdateRuleBody(i, new_body_expr_id);
+      builder_->UpdateCharBudget(i, rule.min_chars, rule.max_chars);
       builder_->UpdateLookaheadAssertion(i, VisitLookaheadAssertion(rule.lookahead_assertion_id));
     }
     return builder_->Get(base_grammar_->GetRootRule().name);
@@ -597,6 +599,7 @@ class RuleInlinerImpl : public GrammarMutator {
    */
   bool CheckIfRuleCanBeInlined(int32_t rule_id) {
     auto rule = base_grammar_->GetRule(rule_id);
+    if (rule.max_chars >= 0) return false;
     auto grammar_expr = base_grammar_->GetGrammarExpr(rule.body_expr_id);
     if (grammar_expr.type != GrammarExprType::kChoices) {
       return false;
@@ -695,6 +698,7 @@ class DeadCodeEliminatorImpl : public GrammarMutator {
       auto rule = grammar->GetRule(rule_id);
       auto new_body_expr_id = VisitExpr(rule.body_expr_id);
       builder_->UpdateRuleBody(rule_id_map_[rule_id], new_body_expr_id);
+      builder_->UpdateCharBudget(rule_id_map_[rule_id], rule.min_chars, rule.max_chars);
       builder_->UpdateLookaheadAssertion(
           rule_id_map_[rule_id], VisitLookaheadAssertion(rule.lookahead_assertion_id)
       );
@@ -926,6 +930,7 @@ class AllowEmptyRuleAnalyzerImpl : public GrammarVisitor<std::vector<int32_t>> {
   void FindExplicitEmptyRules(std::unordered_set<int32_t>* empty_rule_id_set) {
     for (int i = 0; i < static_cast<int>(base_grammar_->NumRules()); ++i) {
       auto rule = base_grammar_->GetRule(i);
+      if (rule.min_chars > 0) continue;
       auto grammar_expr = base_grammar_->GetGrammarExpr(rule.body_expr_id);
       if (grammar_expr.type == GrammarExprType::kTagDispatch ||
           grammar_expr.type == GrammarExprType::kTokenTagDispatch) {
@@ -987,6 +992,7 @@ class AllowEmptyRuleAnalyzerImpl : public GrammarVisitor<std::vector<int32_t>> {
           continue;
         }
         auto rule = base_grammar_->GetRule(referer_rule_id);
+        if (rule.min_chars > 0) continue;
         auto grammar_expr = base_grammar_->GetGrammarExpr(rule.body_expr_id);
 
         XGRAMMAR_DCHECK(

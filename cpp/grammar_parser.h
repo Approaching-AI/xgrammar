@@ -58,6 +58,8 @@ class EBNFLexer {
                      // literal, etc.
     int line;
     int column;
+    int32_t min_chars = 0;
+    int32_t max_chars = -1;
   };
 
   EBNFLexer();

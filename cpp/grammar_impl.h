@@ -80,6 +80,9 @@ class Grammar::Impl {
     int32_t lookahead_assertion_id = -1;
     /*! \brief Whether the lookahead assertion is exact. */
     bool is_exact_lookahead = false;
+    // Internal JSON string budget. The body must be a single character-class star.
+    int32_t min_chars = 0;
+    int32_t max_chars = -1;
   };
 
   /*! \brief Get the number of rules. */
@@ -321,7 +324,9 @@ XGRAMMAR_MEMBER_ARRAY(
     &Grammar::Impl::Rule::name,
     &Grammar::Impl::Rule::body_expr_id,
     &Grammar::Impl::Rule::lookahead_assertion_id,
-    &Grammar::Impl::Rule::is_exact_lookahead
+    &Grammar::Impl::Rule::is_exact_lookahead,
+    &Grammar::Impl::Rule::min_chars,
+    &Grammar::Impl::Rule::max_chars
 );
 
 XGRAMMAR_MEMBER_TABLE(

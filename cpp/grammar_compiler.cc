@@ -48,7 +48,7 @@ class GrammarMatcherForTokenMaskCache : public EarleyParser {
       std::optional<RuleLevelCache>& rule_level_cache,
       const bool& need_expand = true
   )
-      : EarleyParser(grammar, init_state),
+      : EarleyParser(grammar, init_state, true, true),
         init_rule_id_(init_state.rule_id),
         initial_state_(init_state),
         tag_dispatch_rule_id_to_second_slicing_bitset_(tag_dispatch_rule_id_to_second_slicing_bitset
@@ -1058,6 +1058,18 @@ CompiledGrammar GrammarCompilerSub::MultiThreadCompileGrammar(Grammar grammar_un
   // If the compiler is cache-enabled, then we hash the grammars for crossing-grammar caching.
   if (rule_level_cache_.has_value()) {
     GrammarFSMHasher().Apply(&compiled_grammar_impl->grammar);
+    // Keep the 0.2.1 FSM hasher unchanged. Budgeted grammars have a separate
+    // cache namespace: a parent's mask can depend on a child's length bound.
+    bool has_char_budget = false;
+    for (int i = 0; i < compiled_grammar_impl->grammar->NumRules(); ++i) {
+      has_char_budget |= compiled_grammar_impl->grammar->GetRule(i).max_chars >= 0;
+    }
+    if (has_char_budget) {
+      auto budget_hash = std::hash<std::string>{}(compiled_grammar_impl->grammar.ToString());
+      for (auto& hash : compiled_grammar_impl->grammar->per_rule_fsm_hashes) {
+        if (hash.has_value()) hash = HashCombine(hash.value(), budget_hash, 0x43484152);
+      }
+    }
   }
   // Step 3. Compute the adaptive token mask cache
   // The token mask cache is computed for these positions in the grammar:

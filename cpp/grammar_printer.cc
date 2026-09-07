@@ -12,7 +12,12 @@
 namespace xgrammar {
 
 std::string GrammarPrinter::PrintRule(const Rule& rule) {
-  std::string res = rule.name + " ::= " + PrintGrammarExpr(rule.body_expr_id);
+  std::string res = rule.name;
+  if (rule.max_chars >= 0) {
+    res += "[min_chars=" + std::to_string(rule.min_chars) +
+           ",max_chars=" + std::to_string(rule.max_chars) + "]";
+  }
+  res += " ::= " + PrintGrammarExpr(rule.body_expr_id);
   if (rule.lookahead_assertion_id != -1) {
     res += " (=" + PrintGrammarExpr(rule.lookahead_assertion_id) + ")";
   }

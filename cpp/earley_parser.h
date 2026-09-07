@@ -242,6 +242,15 @@ class EarleyParser {
 
   /*! \brief The grammar to be parsed. */
   Grammar grammar_;
+  // Cache masks describe the initial rule's position, not its consumed budget.
+  bool ignore_initial_char_budget_ = false;
+  int32_t initial_budget_rule_id_ = -1;
+
+  bool HasCharBudget(const ParserState& state) const {
+    return state.rule_id >= 0 && grammar_->GetRule(state.rule_id).max_chars >= 0 &&
+           !(ignore_initial_char_budget_ && state.rule_id == initial_budget_rule_id_ &&
+             state.rule_start_pos == ParserState::kNoPrevInputPos);
+  }
 
   /*! \brief In this round of advancing, check if the stop token can be accepted. */
   bool tmp_accept_stop_token_ = false;
@@ -429,7 +438,10 @@ class EarleyParser {
    * \param initial_state The initial state to be pushed into the parser.
    */
   EarleyParser(
-      const Grammar& grammar, const ParserState& initial_state, const bool need_expand = true
+      const Grammar& grammar,
+      const ParserState& initial_state,
+      const bool need_expand = true,
+      bool ignore_initial_char_budget = false
   );
 
   /*!

@@ -65,6 +65,7 @@ class GrammarFunctor {
         cur_rule_name_ = rule.name;
         auto new_body_expr_id = VisitExpr(rule.body_expr_id);
         builder_->UpdateRuleBody(i, new_body_expr_id);
+        builder_->UpdateCharBudget(i, rule.min_chars, rule.max_chars);
         // Handle lookahead assertion
         builder_->UpdateLookaheadAssertion(i, VisitLookaheadAssertion(rule.lookahead_assertion_id));
       }

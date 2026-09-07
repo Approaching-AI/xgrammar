@@ -157,7 +157,10 @@ std::pair</* scanable */ bool, /* completable */ bool> EarleyParser::Predict(
     ExpandNextRuleRefElementOnFSM(state, debug_print);
     const auto& fsm = grammar_->per_rule_fsms[state.rule_id].value();
     return std::make_pair(
-        fsm.GetFsm().IsScanableState(state.element_id), fsm.GetFsm().IsEndState(state.element_id)
+        fsm.GetFsm().IsScanableState(state.element_id),
+        fsm.GetFsm().IsEndState(state.element_id) &&
+            (!HasCharBudget(state) ||
+             state.repeat_count >= grammar_->GetRule(state.rule_id).min_chars)
     );
   }
   const GrammarExpr& grammar_expr = grammar_->GetGrammarExpr(state.sequence_id);
@@ -293,9 +296,14 @@ bool EarleyParser::Advance(const uint8_t ch, bool debug_print) {
 }
 
 EarleyParser::EarleyParser(
-    const Grammar& grammar, const ParserState& init_state, const bool need_expand
+    const Grammar& grammar,
+    const ParserState& init_state,
+    const bool need_expand,
+    bool ignore_initial_char_budget
 )
-    : grammar_(grammar) {
+    : grammar_(grammar),
+      ignore_initial_char_budget_(ignore_initial_char_budget),
+      initial_budget_rule_id_(init_state.rule_id) {
   if (!grammar->optimized) {
     XGRAMMAR_LOG(FATAL) << "The grammar is not optimized. Please optimize the grammar before using "
                            "the Earley parser.";
@@ -883,12 +891,17 @@ void EarleyParser::AdvanceCharacterClassStar(
 void EarleyParser::AdvanceFsm(const ParserState& state, const uint8_t ch) {
   XGRAMMAR_DCHECK(state.rule_id != -1 && grammar_->per_rule_fsms[state.rule_id].has_value());
   const auto& current_fsm = grammar_->per_rule_fsms[state.rule_id].value();
+  // Only terminal character-star rules carry budgets. repeat_count is otherwise
+  // unused there, and already participates in state equality and rollback/fork.
+  bool count_char = HasCharBudget(state) && (ch & 0xc0) != 0x80;
+  if (count_char && state.repeat_count >= grammar_->GetRule(state.rule_id).max_chars) return;
   for (const auto& edge : current_fsm.GetFsm().GetFsm().GetEdges(state.element_id)) {
     if ((!edge.IsCharRange()) || ch < edge.min || ch > edge.max) {
       continue;
     }
     auto new_state = state;
     new_state.element_id = edge.target;
+    if (count_char) ++new_state.repeat_count;
     if ((!current_fsm.GetFsm().IsNonTerminalState(edge.target)) &&
         (!current_fsm.GetFsm().IsEndState(edge.target) &&
          current_fsm.GetFsm().IsScanableState(edge.target))) {

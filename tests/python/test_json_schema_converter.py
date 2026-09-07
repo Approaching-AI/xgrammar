@@ -2034,7 +2034,8 @@ def test_min_max_length():
     schema = {"type": "string", "minLength": 1, "maxLength": 10}
 
     ebnf_grammar = basic_json_rules_ebnf + (
-        r"""root ::= "\"" [^"\\\r\n]{1,10} "\""
+        r"""root_characters[min_chars=1,max_chars=10] ::= [^"\\\r\n]*
+root ::= "\"" root_characters "\""
 """
     )
 
@@ -2058,7 +2059,8 @@ def test_type_array():
 
     ebnf_grammar = basic_json_rules_ebnf + (
         r"""root_type_0 ::= ( ( [1-9] | "1" "0" ) )
-root_type_1 ::= "\"" [^"\\\r\n]{1,10} "\""
+root_type_1_characters[min_chars=1,max_chars=10] ::= [^"\\\r\n]*
+root_type_1 ::= "\"" root_type_1_characters "\""
 root ::= root_type_0 | root_type_1
 """
     )

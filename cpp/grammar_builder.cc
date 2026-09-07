@@ -251,6 +251,12 @@ void GrammarBuilder::UpdateLookaheadExact(int32_t rule_id, bool is_exact) {
   grammar_->rules_[rule_id].is_exact_lookahead = is_exact;
 }
 
+void GrammarBuilder::UpdateCharBudget(int32_t rule_id, int32_t min_chars, int32_t max_chars) {
+  XGRAMMAR_CHECK(rule_id >= 0 && rule_id < static_cast<int32_t>(grammar_->rules_.size()));
+  grammar_->rules_[rule_id].min_chars = min_chars;
+  grammar_->rules_[rule_id].max_chars = max_chars;
+}
+
 void GrammarBuilder::UpdateLookaheadAssertion(
     std::string rule_name, int32_t lookahead_assertion_id
 ) {

@@ -1398,6 +1398,12 @@ std::string JSONSchemaConverter::GenerateString(
   // Check for length constraints
   if (spec.min_length != 0 || spec.max_length != -1) {
     std::string char_pattern = "[^\"\\\\\\r\\n]";
+    if (spec.max_length >= 0) {
+      auto body = ebnf_script_creator_.AddCharBudgetRule(
+          rule_name + "_characters", char_pattern, spec.min_length, spec.max_length
+      );
+      return "\"\\\"\" " + body + " \"\\\"\"";
+    }
     std::string repetition;
     if (spec.max_length == -1) {
       repetition = "{" + std::to_string(spec.min_length) + ",}";

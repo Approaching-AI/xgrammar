@@ -142,8 +142,32 @@ EBNFLexer::Token EBNFLexer::Impl::ParseIdentifierOrBooleanToken() {
     };
   }
 
-  // Otherwise it's an identifier
-  return {TokenType::Identifier, identifier, identifier, start_line, start_column};
+  Token token{TokenType::Identifier, identifier, identifier, start_line, start_column};
+  // Internal string-rule annotation; leave ordinary character classes untouched.
+  if (std::string_view(cur_).substr(0, 11) == "[min_chars=") {
+    Consume(11);
+    auto read_bound = [&]() -> int32_t {
+      int64_t value = 0;
+      if (!isdigit(Peek())) ReportLexerError("Expected non-negative character budget");
+      while (isdigit(Peek())) {
+        value = value * 10 + (Peek() - '0');
+        if (value > INT32_MAX) ReportLexerError("Character budget exceeds int32");
+        Consume();
+      }
+      return static_cast<int32_t>(value);
+    };
+    token.min_chars = read_bound();
+    if (std::string_view(cur_).substr(0, 11) != ",max_chars=") {
+      ReportLexerError("Expected ,max_chars=");
+    }
+    Consume(11);
+    token.max_chars = read_bound();
+    if (Peek() != ']' || token.min_chars > token.max_chars) {
+      ReportLexerError("Invalid character budget");
+    }
+    Consume();
+  }
+  return token;
 }
 
 // Parse string literal
@@ -1155,6 +1179,8 @@ EBNFParser::Rule EBNFParser::ParseRule() {
     ReportParseError("Expect rule name");
   }
   cur_rule_name_ = std::any_cast<std::string>(Peek().value);
+  int32_t min_chars = Peek().min_chars;
+  int32_t max_chars = Peek().max_chars;
   Consume();
 
   PeekAndConsume(TokenType::Assign, "Expect ::=");
@@ -1166,7 +1192,17 @@ EBNFParser::Rule EBNFParser::ParseRule() {
     lookahead_id = ParseLookaheadAssertion();
   }
 
-  return {cur_rule_name_, body_id, lookahead_id};
+  if (max_chars >= 0) {
+    auto expr = builder_.GetGrammarExpr(body_id);
+    while ((expr.type == GrammarExprType::kChoices || expr.type == GrammarExprType::kSequence) &&
+           expr.size() == 1) {
+      expr = builder_.GetGrammarExpr(expr[0]);
+    }
+    if (expr.type != GrammarExprType::kCharacterClassStar) {
+      ReportParseError("Character budget requires a single character-class star");
+    }
+  }
+  return {cur_rule_name_, body_id, lookahead_id, false, min_chars, max_chars};
 }
 
 void EBNFParser::InitRuleNames() {
@@ -1204,6 +1240,9 @@ Grammar EBNFParser::Parse(
   while (Peek().type != TokenType::EndOfFile) {
     auto new_rule = ParseRule();
     builder_.UpdateRuleBody(new_rule.name, new_rule.body_expr_id);
+    builder_.UpdateCharBudget(
+        builder_.GetRuleId(new_rule.name), new_rule.min_chars, new_rule.max_chars
+    );
     builder_.UpdateLookaheadAssertion(new_rule.name, new_rule.lookahead_assertion_id);
   }
 
