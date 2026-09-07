@@ -92,3 +92,10 @@ def test_root_and_tail_reference_budget(prefix):
 def test_budget_rejects_non_character_star(expr):
     with pytest.raises(RuntimeError, match="single character-class star"):
         xgr.Grammar.from_ebnf(f'root[min_chars=0,max_chars=2] ::= {expr}\nother ::= "a"')
+
+
+@pytest.mark.parametrize("limits", ["-1,2", "你,2", "0,2147483648", "3,2"])
+def test_budget_rejects_invalid_limits(limits):
+    lower, upper = limits.split(",")
+    with pytest.raises(RuntimeError):
+        xgr.Grammar.from_ebnf(f"root[min_chars={lower},max_chars={upper}] ::= [a-z]*")

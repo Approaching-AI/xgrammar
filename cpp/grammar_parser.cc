@@ -148,8 +148,8 @@ EBNFLexer::Token EBNFLexer::Impl::ParseIdentifierOrBooleanToken() {
     Consume(11);
     auto read_bound = [&]() -> int32_t {
       int64_t value = 0;
-      if (!isdigit(Peek())) ReportLexerError("Expected non-negative character budget");
-      while (isdigit(Peek())) {
+      if (Peek() < '0' || Peek() > '9') ReportLexerError("Expected non-negative character budget");
+      while (Peek() >= '0' && Peek() <= '9') {
         value = value * 10 + (Peek() - '0');
         if (value > INT32_MAX) ReportLexerError("Character budget exceeds int32");
         Consume();
