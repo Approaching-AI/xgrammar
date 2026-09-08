@@ -1842,11 +1842,6 @@ int32_t RepetitionRangeExpanderImpl::HandleRepetitionRange(
   const auto repeat_name = cur_rule_name + "_repeat_1";
   XGRAMMAR_DCHECK(lower >= kUnzipThreshold && upper >= lower);
 
-  // If we have infinite repetition part, add it to the sequence.
-  if (infinite_repetition_id.has_value()) {
-    repeated_sequence.push_back(infinite_repetition_id.value());
-  }
-
   // The repetition body.
   if (upper != kUnzipThreshold) {
     XGRAMMAR_DCHECK(upper > kUnzipThreshold);
@@ -1865,6 +1860,14 @@ int32_t RepetitionRangeExpanderImpl::HandleRepetitionRange(
   // Add the last threshold grammar_expr_id to the sequence.
   for (int i = 0; i < kUnzipThreshold; ++i) {
     repeated_sequence.push_back(grammar_expr_id);
+  }
+
+  // Consume the required repetitions before entering the unbounded suffix.
+  // A leading star keeps the counted suffix and its lookahead live at every
+  // position, even long after the minimum has been satisfied. Both orders
+  // recognize expr{lower,}, but the trailing star lets those states retire.
+  if (infinite_repetition_id.has_value()) {
+    repeated_sequence.push_back(infinite_repetition_id.value());
   }
 
   // Add the sequence to choices.

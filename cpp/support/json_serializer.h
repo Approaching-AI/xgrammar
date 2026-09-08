@@ -62,7 +62,8 @@ class SerializeVersion {
    * \brief The current serialization version. When the serialization result of any object in
    * XGrammar is changed, this version should be bumped.
    */
-  static constexpr const char kXGrammarSerializeVersion[] = "v13-maxlength-20260907";
+  static constexpr const char kXGrammarSerializeVersion[] =
+      "v13-maxlength-20260907-minlength-20260909";
 };
 
 /*!
