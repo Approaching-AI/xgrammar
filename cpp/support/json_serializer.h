@@ -63,7 +63,7 @@ class SerializeVersion {
    * XGrammar is changed, this version should be bumped.
    */
   static constexpr const char kXGrammarSerializeVersion[] =
-      "v13-maxlength-20260907-minlength-20260909";
+      "v13-maxlength-20260907-minlength-20260909-fsm32-20260913";
 };
 
 /*!
