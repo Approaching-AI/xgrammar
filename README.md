@@ -15,6 +15,13 @@
 
 </div>
 
+## Approaching-AI K3 backports
+
+This branch contains our XGrammar **v0.2.1-based** maxLength, minLength, and FSM
+32-bit index fixes. It is an internal build, not the upstream PyPI release.
+See the [patch history, validation, and installation notes](docs/approaching_k3_backports.md)
+before building or upgrading. The upstream README continues below.
+
 ## News
 - [2026/5] XGrammar-2 has been released! Check out our [blog](https://blog.mlc.ai/2026/05/04/xgrammar-2-fast-customizable-structured-generation) for more information.
 - [2025/12] XGrammar has been officially integrated into [Mirai](https://github.com/trymirai/uzu)

@@ -1,5 +1,9 @@
 # Internal 0.2.1 maxLength backport
 
+This document describes the historical `48d44de` checkpoint only. Its protected-FSM
+audit applies to that checkpoint, not the later minLength/FSM32 branch. For the
+current patch stack, see [Approaching-AI K3 backports](../approaching_k3_backports.md).
+
 Base: `5b4e9ce9e72524037ae24ecd831b9b6604d2eb48` (official v0.2.1).
 Package: `0.2.1+maxlength.20260907`. This is an internal candidate, not an
 official XGrammar release. The 0.2.5/main patch is not an ancestor.
