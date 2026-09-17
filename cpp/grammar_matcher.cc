@@ -661,6 +661,17 @@ bool GrammarMatcher::Impl::AcceptToken(int32_t token_id, bool debug_print) {
     return accepted;
   }
 
+  // Identity-sensitive tokens cannot take the byte path, even if their decoded
+  // spelling is valid string content. This also prevents retaining a competing
+  // body parse after consuming an explicit protocol delimiter.
+  if (std::binary_search(
+          grammar_->atomic_token_ids.begin(), grammar_->atomic_token_ids.end(), token_id
+      )) {
+    if (!AdvanceAtomicToken(token_id, debug_print)) return false;
+    token_length_history.push_back(1);
+    return true;
+  }
+
   const auto& special_token_ids = tokenizer_info_.GetSpecialTokenIds();
   if (std::find(special_token_ids.begin(), special_token_ids.end(), token_id) !=
       special_token_ids.end()) {
@@ -1026,6 +1037,35 @@ bool GrammarMatcher::Impl::FillNextTokenBitmask(
   SetTokenBitmask(
       bitmask_data_ptr, tmp_accepted_bitset_, tmp_rejected_indices_, can_reach_end, false
   );
+  // Replace only the identity-sensitive bits with the explicit-token result.
+  // No speculative mutation or 256-token accept/rollback loop is needed.
+  if (!grammar_->atomic_token_ids.empty()) {
+    DynamicBitset mask(
+        tokenizer_info_.GetVocabSize(), reinterpret_cast<uint32_t*>(bitmask_data_ptr)
+    );
+    for (int id : grammar_->atomic_token_ids) {
+      if (std::find(stop_token_ids_.begin(), stop_token_ids_.end(), id) != stop_token_ids_.end())
+        continue;
+      mask.Set(id, false);
+    }
+    for (const auto& state : latest_states) {
+      if (state.rule_id == -1) continue;
+      const auto& fsm = grammar_->per_rule_fsms[state.rule_id].value().GetFsm().GetFsm();
+      for (const auto& edge : fsm.GetEdges(state.element_id)) {
+        if (!edge.IsToken()) continue;
+        auto info = fsm.GetTokenEdgeInfo(edge.GetAuxIndex());
+        for (int i = 0; i < info.Count(); ++i) {
+          int id = info.TokenIds()[i];
+          if (std::binary_search(
+                  grammar_->atomic_token_ids.begin(), grammar_->atomic_token_ids.end(), id
+              ) &&
+              std::find(stop_token_ids_.begin(), stop_token_ids_.end(), id) ==
+                  stop_token_ids_.end())
+            mask.Set(id, true);
+        }
+      }
+    }
+  }
   if (debug_print) {
     XGRAMMAR_LOG(INFO) << "Filled bitmask: " << PrintBitmask(bitmask_data_ptr, tokenizer_info_);
   }
@@ -1033,6 +1073,9 @@ bool GrammarMatcher::Impl::FillNextTokenBitmask(
 }
 
 std::string GrammarMatcher::Impl::FindJumpForwardString() {
+  // Text-only jump-forward cannot preserve token identity. Keep the token
+  // sampling path for opt-in atomic grammars (including their literal text).
+  if (!grammar_->atomic_token_ids.empty()) return "";
   XGRAMMAR_CHECK(!IsStopTokenAccepted())
       << "GrammarMatcher has terminated after accepting the stop token, but is trying to "
          "get the jump forward string";

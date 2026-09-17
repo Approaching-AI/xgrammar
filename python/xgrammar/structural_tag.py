@@ -31,11 +31,16 @@ class JSONSchemaFormat(BaseModel):
     """The type of the format."""
     json_schema: Union[bool, Dict[str, Any]]
     """The JSON schema."""
-    style: Literal["json", "qwen_xml", "minimax_xml", "deepseek_xml", "glm_xml"] = "json"
+    style: Literal[
+        "json", "qwen_xml", "minimax_xml", "deepseek_xml", "glm_xml", "kimi_k3_string"
+    ] = "json"
     """How to parse the content. Valid values: \"json\" (standard JSON), \"qwen_xml\" (Qwen XML:
     <parameter=key>value</parameter>), \"minimax_xml\" (MiniMax XML: <parameter name=\"key\">value</parameter>),
     \"deepseek_xml\" (DeepSeek XML(DeepSeek-v3.2): <{dsml_token}parameter name=\"key\" string=\"true|false\">value</{dsml_token}parameter>),
-    \"glm_xml\" (GLM XML: <arg_key>key</arg_key><arg_value>value</arg_value>)."""
+    \"glm_xml\" (GLM XML: <arg_key>key</arg_key><arg_value>value</arg_value>),
+    \"kimi_k3_string\" (unquoted Kimi K3 string argument without character-level
+    delimiter exclusions). This expects a string-only schema. Use atomic_tokens
+    and explicit TokenFormat delimiters to keep control IDs out of string content."""
 
 
 class AnyTextFormat(BaseModel):
@@ -506,6 +511,12 @@ class StructuralTag(BaseModel):
     """The type must be "structural_tag"."""
     format: Format
     """The format of the structural tag. Could be any of the structural tag formats."""
+    atomic_tokens: List[Union[int, str]] = Field(default_factory=list)
+    """Tokens accepted only by explicit positive token edges, never as text or wildcards.
+    Stop tokens retain their normal end-of-grammar semantics."""
+    atomic_token_ranges: List[Tuple[Union[int, str], Union[int, str]]] = Field(default_factory=list)
+    """Inclusive ranges with the same semantics as atomic_tokens. String endpoints
+    are resolved against the tokenizer vocabulary, not hard-coded token IDs."""
 
     @staticmethod
     def from_legacy_structural_tag(

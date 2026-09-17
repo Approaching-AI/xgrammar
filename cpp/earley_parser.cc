@@ -921,7 +921,9 @@ void EarleyParser::ScanAtomicToken(const ParserState& state, int32_t token_id) {
     if (edge.IsToken()) {
       auto info = current_fsm.GetFsm().GetFsm().GetTokenEdgeInfo(edge.GetAuxIndex());
       matched = info.Contains(token_id);
-    } else if (edge.IsExcludeToken()) {
+    } else if (edge.IsExcludeToken() &&
+               !std::binary_search(grammar_->atomic_token_ids.begin(),
+                                   grammar_->atomic_token_ids.end(), token_id)) {
       auto info = current_fsm.GetFsm().GetFsm().GetExcludeTokenEdgeInfo(edge.GetAuxIndex());
       matched = info.Accepts(token_id);
     }

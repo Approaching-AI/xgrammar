@@ -1482,6 +1482,8 @@ CompiledGrammar GrammarCompiler::Impl::CompileRegex(const std::string& regex) {
 }
 
 CompiledGrammar GrammarCompiler::Impl::CompileGrammar(const Grammar& grammar) {
+  // EBNF does not encode token-identity policy. Do not round-trip through it.
+  if (!grammar->atomic_token_ids.empty()) return no_cache_compiler_.CompileGrammar(grammar);
   if (!cache_enabled_) {
     return no_cache_compiler_.CompileGrammar(grammar);
   }

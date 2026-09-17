@@ -20,6 +20,7 @@
 #include "grammar_functor.h"
 #include "grammar_impl.h"
 #include "json_schema_converter.h"
+#include "kimi_k3_string.h"
 #include "support/logging.h"
 #include "support/recursion_guard.h"
 #include "support/utils.h"
@@ -301,6 +302,10 @@ picojson::value TokenDispatchFormat::ToJSON() const {
 
 /************** StructuralTag Parser **************/
 
+Result<std::vector<std::variant<int32_t, std::string>>, ISTError> ParseIntOrStringArray(
+    const picojson::value& value, const std::string& field_name
+);
+
 class StructuralTagParser {
  public:
   static Result<StructuralTag, StructuralTagError> FromJSON(const std::string& json);
@@ -379,7 +384,25 @@ Result<StructuralTag, ISTError> StructuralTagParser::ParseStructuralTag(const pi
   if (format.IsErr()) {
     return ResultErr<ISTError>(std::move(format).UnwrapErr());
   }
-  return ResultOk<StructuralTag>(std::move(format).Unwrap());
+  StructuralTag tag(std::move(format).Unwrap());
+  if (auto it = obj.find("atomic_tokens"); it != obj.end()) {
+    auto parsed = ParseIntOrStringArray(it->second, "atomic_tokens");
+    if (parsed.IsErr()) return ResultErr<ISTError>(std::move(parsed).UnwrapErr());
+    tag.atomic_tokens = std::move(parsed).Unwrap();
+  }
+  if (auto it = obj.find("atomic_token_ranges"); it != obj.end()) {
+    if (!it->second.is<picojson::array>())
+      return ResultErr<ISTError>("atomic_token_ranges must be an array");
+    for (const auto& range : it->second.get<picojson::array>()) {
+      auto parsed = ParseIntOrStringArray(range, "atomic_token_ranges");
+      if (parsed.IsErr()) return ResultErr<ISTError>(std::move(parsed).UnwrapErr());
+      auto endpoints = std::move(parsed).Unwrap();
+      if (endpoints.size() != 2)
+        return ResultErr<ISTError>("atomic_token_ranges requires pairs of inclusive endpoints");
+      tag.atomic_token_ranges.push_back(std::move(endpoints));
+    }
+  }
+  return ResultOk<StructuralTag>(std::move(tag));
 }
 
 Result<Format, ISTError> StructuralTagParser::ParseFormat(const picojson::value& value) {
@@ -531,10 +554,10 @@ Result<JSONSchemaFormat, ISTError> StructuralTagParser::ParseJSONSchemaFormat(
     if (it != obj.end() && it->second.is<std::string>()) {
       style = it->second.get<std::string>();
       if (style != "json" && style != "qwen_xml" && style != "minimax_xml" &&
-          style != "deepseek_xml" && style != "glm_xml") {
+          style != "deepseek_xml" && style != "glm_xml" && style != "kimi_k3_string") {
         return ResultErr<ISTError>(
-            "style must be \"json\", \"qwen_xml\", \"minimax_xml\", \"deepseek_xml\", or "
-            "\"glm_xml\""
+            "style must be \"json\", \"qwen_xml\", \"minimax_xml\", \"deepseek_xml\", "
+            "\"glm_xml\", or \"kimi_k3_string\""
         );
       }
     }
@@ -1185,7 +1208,24 @@ class StructuralTagTokenResolver {
 std::optional<ISTError> StructuralTagTokenResolver::Resolve(
     StructuralTag* structural_tag, const std::optional<TokenizerInfo>& tokenizer_info
 ) {
-  return StructuralTagTokenResolver(tokenizer_info).ResolveFormat(&structural_tag->format);
+  StructuralTagTokenResolver resolver(tokenizer_info);
+  auto& ids = structural_tag->atomic_token_ids;
+  if (auto err = resolver.ResolveIntOrStringVec(structural_tag->atomic_tokens, &ids)) return err;
+  for (const auto& range : structural_tag->atomic_token_ranges) {
+    std::vector<int32_t> endpoints;
+    if (auto err = resolver.ResolveIntOrStringVec(range, &endpoints)) return err;
+    if (!tokenizer_info || endpoints[0] < 0 || endpoints[1] < endpoints[0] ||
+        endpoints[1] >= tokenizer_info->GetVocabSize())
+      return ISTError("Invalid atomic token range");
+    for (int id = endpoints[0]; id <= endpoints[1]; ++id) ids.push_back(id);
+  }
+  for (auto id : ids) {
+    if (!tokenizer_info || id < 0 || id >= tokenizer_info->GetVocabSize())
+      return ISTError("Atomic token ID is outside the vocabulary");
+  }
+  std::sort(ids.begin(), ids.end());
+  ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+  return resolver.ResolveFormat(&structural_tag->format);
 }
 
 std::optional<ISTError> StructuralTagTokenResolver::ResolveTokenFormat(TokenFormat* tf) {
@@ -1818,6 +1858,11 @@ Result<int, ISTError> StructuralTagGrammarConverter::VisitSub(const ConstStringF
 }
 
 Result<int, ISTError> StructuralTagGrammarConverter::VisitSub(const JSONSchemaFormat& format) {
+  if (format.style == "kimi_k3_string") {
+    return ResultOk(
+        SubGrammarAdder().Apply(&grammar_builder_, KimiK3StringGrammar(format.json_schema))
+    );
+  }
   const static std::unordered_map<std::string, std::function<std::string(const std::string&)>>
       style_to_grammar_converter = {
           {"json",
@@ -2415,7 +2460,9 @@ Result<Grammar, StructuralTagError> StructuralTagToGrammar(
   if (result.IsErr()) {
     return ResultErr(std::move(result).UnwrapErr());
   }
-  return ResultOk(GrammarNormalizer::Apply(std::move(result).Unwrap()));
+  auto grammar = GrammarNormalizer::Apply(std::move(result).Unwrap());
+  grammar->atomic_token_ids = std::move(structural_tag.atomic_token_ids);
+  return ResultOk(std::move(grammar));
 }
 
 }  // namespace xgrammar

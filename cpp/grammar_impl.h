@@ -312,6 +312,10 @@ class Grammar::Impl {
   /*! \brief Whether the grammar is optimized. */
   bool optimized = false;
 
+  // These tokens may only traverse explicit positive token edges, never text
+  // or wildcard token edges. Sorted and unique; stop tokens keep EOS semantics.
+  std::vector<int32_t> atomic_token_ids;
+
   friend class GrammarBuilder;
   friend class GrammarCompiler;
 
@@ -346,7 +350,9 @@ XGRAMMAR_MEMBER_TABLE(
     "allow_empty_rule_ids",
     &Grammar::Impl::allow_empty_rule_ids,
     "optimized",
-    &Grammar::Impl::optimized
+    &Grammar::Impl::optimized,
+    "atomic_token_ids",
+    &Grammar::Impl::atomic_token_ids
 );
 
 }  // namespace xgrammar

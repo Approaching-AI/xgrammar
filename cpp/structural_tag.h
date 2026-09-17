@@ -367,6 +367,9 @@ struct TokenDispatchFormat {
 struct StructuralTag {
   static constexpr const char* type = "structural_tag";
   Format format;
+  std::vector<std::variant<int32_t, std::string>> atomic_tokens;
+  std::vector<std::vector<std::variant<int32_t, std::string>>> atomic_token_ranges;
+  std::vector<int32_t> atomic_token_ids;
 
   StructuralTag(Format format) : format(std::move(format)) {}
 };

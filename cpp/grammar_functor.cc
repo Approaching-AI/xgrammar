@@ -2681,7 +2681,9 @@ int32_t SubGrammarAdder::Apply(GrammarBuilder* builder, const Grammar& sub_gramm
 /*************************** Forward grammar Normalizers to their impl ***************************/
 
 Grammar GrammarNormalizer::Apply(const Grammar& grammar) {
-  return GrammarNormalizerImpl().Apply(grammar);
+  auto result = GrammarNormalizerImpl().Apply(grammar);
+  result->atomic_token_ids = grammar->atomic_token_ids;
+  return result;
 }
 
 Grammar StructureNormalizer::Apply(const Grammar& grammar) {
@@ -2765,7 +2767,9 @@ Grammar RepetitionRangeExpander::Apply(const Grammar& grammar) {
 }
 
 Grammar GrammarOptimizer::Apply(const Grammar& grammar) {
-  return GrammarOptimizerImpl::Apply(grammar);
+  auto result = GrammarOptimizerImpl::Apply(grammar);
+  result->atomic_token_ids = grammar->atomic_token_ids;
+  return result;
 }
 
 Grammar ByteStringFuser::Apply(const Grammar& grammar) {
