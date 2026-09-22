@@ -10,10 +10,31 @@ our modified source is `codex/xgrammar-021-fsm-int32-fix`.
 | `e976116` → `48d44de` | Finite maxLength character budgets and validation |
 | `0259b7d5e4549ec60f3b25d08b93dfdfed93f323` | Retire large unbounded repetition prefix states for minLength |
 | `6ce98307c7e82fed2f8cc8f643efb39edbe2e7e8` | Preserve 32-bit rule and auxiliary indices throughout FSM construction and traversal |
+| `codex/xgrammar-021-worker-crash-hardening` | Native process safety, large-grammar scaling, and bounded XML whitespace state |
 
 The package version is
-`0.2.1+maxlength.20260907.minlength.20260909.fsm32.20260913`.
+`0.2.1+maxlength.20260907.minlength.20260909.fsm32.20260913.hardening.20260922`.
 Later documentation-only publication commits do not change the tested runtime code.
+
+## Worker crash hardening checkpoint
+
+This checkpoint backports the process-safety portions of upstream #691, #702,
+#704, #869, and #879 without merging upstream `main` wholesale:
+
+- reject token/vocabulary inconsistencies before compiler worker threads index native arrays;
+- rebuild derived tokenizer indices after JSON deserialization and preserve embedded NUL bytes;
+- propagate the first task exception from `ThreadPool` to its caller instead of terminating;
+- share identical repetition expansions and use sparse FSM end states to bound large-schema cost;
+- remove ambiguous whitespace repetitions around unconstrained XML strings and guard every
+  `Compact2DArray` append before an int32 CSR offset can overflow;
+- reject minimum string/array counts beyond int32 and treat larger maxima as unbounded.
+
+The fixed subprocess regressions changed from SIGSEGV, SIGBUS, and SIGABRT to successful
+completion or catchable `RuntimeError`. On an isolated macOS CPU build, 16k and 50k flat-property
+schemas compiled in 1.48 s / 9.61 s with peak RSS of about 541 MiB / 1.08 GiB. A GLM-style
+unconstrained XML string accepted 66,560 spaces in 3 ms with two active parser states before and
+after. The targeted non-HF suite passed 576 tests; Linux sanitizer and production K3 tokenizer
+validation remain rollout gates.
 
 ## Source and installation
 
@@ -62,6 +83,10 @@ FSMEdge's internal native layout grows from 8 to 16 bytes. Rebuild/install the
 whole package and verify the libraries loaded by running processes during an
 approved rollout. Do not mix old and new native objects or hot-overwrite a loaded
 library. Compiler caching and the prior min/maxLength semantics remain enabled.
+
+The hardening checkpoint does not change serialized field layout, so the FSM32
+serialization identifier remains unchanged. Validation and compilation behavior do
+change; deploy the matching package version atomically on tokenizer and scheduler workers.
 
 The inherited serializer can produce quadratic output when exporting certain
 large shared compiled FSM graphs. That separate scaling limitation is unchanged.
