@@ -21,6 +21,13 @@ def test_parse_token_basic():
     assert str(grammar) == expected
 
 
+def test_compile_rejects_token_id_outside_vocabulary():
+    tokenizer_info = xgr.TokenizerInfo([b"a", b"b", b"</s>"], stop_token_ids=[2])
+    grammar = xgr.Grammar.from_ebnf('root ::= Token(2147483647) "a"\n')
+    with pytest.raises(RuntimeError, match="out of the vocabulary range"):
+        xgr.GrammarCompiler(tokenizer_info, max_threads=2).compile_grammar(grammar)
+
+
 def test_parse_token_single():
     before = "root ::= Token(42)\n"
     expected = "root ::= ((Token(42)))\n"

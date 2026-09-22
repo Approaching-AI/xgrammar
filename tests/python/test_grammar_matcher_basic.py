@@ -806,6 +806,20 @@ def test_batch_fill_next_token_bitmask():
         assert accepted == expected_accepted_tokens[1][i]
 
 
+def test_batch_worker_exception_is_rethrown_on_calling_thread():
+    tokenizer_info = xgr.TokenizerInfo([b"a", b"</s>"], stop_token_ids=[1])
+    compiled = xgr.GrammarCompiler(tokenizer_info, max_threads=1).compile_grammar(
+        xgr.Grammar.from_ebnf('root ::= "a"')
+    )
+    matcher = xgr.GrammarMatcher(compiled)
+    assert matcher.accept_token(0)
+    assert matcher.accept_token(1)
+
+    bitmask = xgr.allocate_token_bitmask(1, tokenizer_info.vocab_size)
+    with pytest.raises(RuntimeError, match="has terminated"):
+        xgr.BatchGrammarMatcher(2).batch_fill_next_token_bitmask([matcher], bitmask)
+
+
 @pytest.mark.hf_token_required
 def test_batch_fill_next_token_bitmask_pressure():
     tokenizer_path = "meta-llama/Llama-2-7b-chat-hf"

@@ -52,15 +52,20 @@ class XMLToolCallingConverter : public JSONSchemaConverter {
   std::string FormatProperty(
       const std::string& key,
       const std::string& value_rule,
+      const SchemaSpecPtr& value_schema,
       const std::string& rule_name,
       int64_t idx
   ) override;
   std::string FormatOtherProperty(
       const std::string& key_pattern,
       const std::string& value_rule,
+      const SchemaSpecPtr& value_schema,
       const std::string& rule_name,
       const std::string& rule_name_suffix
   ) override;
+
+  std::string FormatPropertyValue(const std::string& value_rule, const SchemaSpecPtr& value_schema)
+      const;
 
   std::string GetKeyPattern() const override;
   std::string GetBasicAnyRuleName() const override;

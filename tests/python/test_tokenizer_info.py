@@ -8,6 +8,11 @@ from transformers import AutoTokenizer, PreTrainedTokenizerBase
 import xgrammar as xgr
 
 
+def test_vocab_size_cannot_be_smaller_than_vocab():
+    with pytest.raises(RuntimeError, match="must be at least the number of tokens"):
+        xgr.TokenizerInfo(["a", "b"], vocab_size=1)
+
+
 @pytest.fixture(scope="module")
 def tokenizer_info_storage() -> Dict[str, Tuple[PreTrainedTokenizerBase, xgr.TokenizerInfo]]:
     """Mapping from the tokenizer path to the huggingface tokenizer and XGrammar tokenizer info."""

@@ -8,7 +8,7 @@ from pydantic import BaseModel, RootModel
 from transformers import AutoTokenizer  # type: ignore
 
 import xgrammar as xgr
-from xgrammar.testing import _is_grammar_accept_string
+from xgrammar.testing import _get_masked_tokens_from_bitmask, _is_grammar_accept_string
 
 
 def construct_grammar():
@@ -187,6 +187,24 @@ def test_serialize_tokenizer_info_functional():
 
     test_input = "aaa"
     assert matcher_original.accept_string(test_input) == matcher_recovered.accept_string(test_input)
+
+
+def test_serialize_tokenizer_info_preserves_binary_vocab_and_token_masks():
+    original = xgr.TokenizerInfo(
+        [b"\x00", b"a", b"</s>"],
+        vocab_type=xgr.VocabType.RAW,
+        vocab_size=4,
+        stop_token_ids=[2],
+    )
+    recovered = xgr.TokenizerInfo.deserialize_json(original.serialize_json())
+    assert recovered.decoded_vocab == original.decoded_vocab
+
+    compiled = xgr.GrammarCompiler(recovered, cache_enabled=False).compile_grammar(
+        xgr.Grammar.from_ebnf("root ::= Token(1)\n")
+    )
+    bitmask = xgr.allocate_token_bitmask(1, recovered.vocab_size)
+    xgr.GrammarMatcher(compiled).fill_next_token_bitmask(bitmask)
+    assert _get_masked_tokens_from_bitmask(bitmask, recovered.vocab_size) == [0, 2, 3]
 
 
 def test_serialize_compiled_grammar():

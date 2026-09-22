@@ -40,6 +40,8 @@ class TokenizerInfo::Impl {
     return token_id_to_sorted_vocab_index_;
   }
 
+  void BuildTokenIdToSortedVocabIndex();
+
   std::string DumpMetadata() const;
   picojson::value DumpMetadataValue() const;
 

@@ -7,6 +7,7 @@
 #define XGRAMMAR_SUPPORT_THREAD_POOL_H_
 
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <future>
 #include <mutex>
@@ -51,7 +52,12 @@ class ThreadPool {
             task = std::move(task_queue_.front());
             task_queue_.pop();
           }
-          task();
+          try {
+            task();
+          } catch (...) {
+            std::unique_lock<std::mutex> lock(queue_mutex_);
+            if (!first_exception_) first_exception_ = std::current_exception();
+          }
           TaskComplete();
         }
       });
@@ -112,8 +118,11 @@ class ThreadPool {
   }
 
   void Wait() {
-    std::unique_lock<std::mutex> lock(queue_mutex_);
-    tasks_done_condition_.wait(lock, [this] { return unfinished_task_count_ == 0; });
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex_);
+      tasks_done_condition_.wait(lock, [this] { return unfinished_task_count_ == 0; });
+    }
+    RethrowTaskException();
   }
 
   /*!
@@ -124,6 +133,21 @@ class ThreadPool {
    * before shutdown completes.
    */
   void Join() {
+    Shutdown();
+    RethrowTaskException();
+  }
+
+  /*! \brief Destructor that shuts down without throwing. */
+  ~ThreadPool() { Shutdown(); }
+
+  // Prevent copying or moving of the thread pool
+  ThreadPool(const ThreadPool&) = delete;
+  ThreadPool(ThreadPool&&) = delete;
+  ThreadPool& operator=(const ThreadPool&) = delete;
+  ThreadPool& operator=(ThreadPool&&) = delete;
+
+ private:
+  void Shutdown() {
     {
       std::unique_lock<std::mutex> lock(queue_mutex_);
       if (shutdown_) return;  // Already shut down
@@ -136,18 +160,15 @@ class ThreadPool {
     }
   }
 
-  /*!
-   * \brief Destructor that ensures graceful shutdown of the thread pool.
-   */
-  ~ThreadPool() { Join(); }
+  void RethrowTaskException() {
+    std::exception_ptr exception;
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex_);
+      std::swap(exception, first_exception_);
+    }
+    if (exception) std::rethrow_exception(exception);
+  }
 
-  // Prevent copying or moving of the thread pool
-  ThreadPool(const ThreadPool&) = delete;
-  ThreadPool(ThreadPool&&) = delete;
-  ThreadPool& operator=(const ThreadPool&) = delete;
-  ThreadPool& operator=(ThreadPool&&) = delete;
-
- private:
   void TaskComplete() {
     std::unique_lock<std::mutex> lock(queue_mutex_);
     --unfinished_task_count_;
@@ -170,6 +191,8 @@ class ThreadPool {
   bool shutdown_ = false;
   /*! \brief Number of unfinished tasks */
   int unfinished_task_count_ = 0;
+  /*! \brief The first task exception, rethrown by Wait or Join. */
+  std::exception_ptr first_exception_ = nullptr;
 };
 
 inline void ParallelFor(int low, int high, int num_threads, std::function<void(int)> f) {

@@ -273,6 +273,9 @@ TokenizerInfo::Impl::Impl(
     : vocab_type_(vocab_type),
       vocab_size_(vocab_size.value_or(encoded_vocab.size())),
       add_prefix_space_(add_prefix_space) {
+  XGRAMMAR_CHECK(vocab_size_ >= static_cast<int>(encoded_vocab.size()))
+      << "vocab_size (" << vocab_size_ << ") must be at least the number of tokens in the vocab ("
+      << encoded_vocab.size() << ").";
   decoded_vocab_.reserve(encoded_vocab.size());
   sorted_decoded_vocab_.reserve(encoded_vocab.size());
   for (int i = 0; i < static_cast<int>(encoded_vocab.size()); ++i) {
@@ -298,10 +301,7 @@ TokenizerInfo::Impl::Impl(
   };
   std::sort(sorted_decoded_vocab_.begin(), sorted_decoded_vocab_.end(), f_compare_token);
 
-  token_id_to_sorted_vocab_index_.assign(vocab_size_, -1);
-  for (int32_t i = 0; i < static_cast<int32_t>(sorted_decoded_vocab_.size()); ++i) {
-    token_id_to_sorted_vocab_index_[sorted_decoded_vocab_[i].first] = i;
-  }
+  BuildTokenIdToSortedVocabIndex();
 
   // The value means: the subtree is [i, trie_subtree_nodes_range[i]).
   trie_subtree_nodes_range_.resize(sorted_decoded_vocab_.size(), 0);
@@ -319,6 +319,13 @@ TokenizerInfo::Impl::Impl(
     const auto& top_pair = prefix_stack.top();
     trie_subtree_nodes_range_[top_pair.second] = sorted_decoded_vocab_.size();
     prefix_stack.pop();
+  }
+}
+
+void TokenizerInfo::Impl::BuildTokenIdToSortedVocabIndex() {
+  token_id_to_sorted_vocab_index_.assign(vocab_size_, -1);
+  for (int32_t i = 0; i < static_cast<int32_t>(sorted_decoded_vocab_.size()); ++i) {
+    token_id_to_sorted_vocab_index_[sorted_decoded_vocab_[i].first] = i;
   }
 }
 
@@ -499,6 +506,7 @@ std::variant<TokenizerInfo, SerializationError> TokenizerInfo::DeserializeJSON(
   if (auto err = AutoDeserializeJSON(&tokenizer_info, json_string, true, "TokenizerInfo")) {
     return err.value();
   }
+  tokenizer_info->BuildTokenIdToSortedVocabIndex();
   return tokenizer_info;
 }
 
