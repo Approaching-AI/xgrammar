@@ -227,42 +227,61 @@ std::string XMLToolCallingConverter::FormatPropertyKey(const std::string& key) {
 }
 
 std::string XMLToolCallingConverter::FormatProperty(
-    const std::string& key, const std::string& value_rule, const std::string& rule_name, int64_t idx
+    const std::string& key,
+    const std::string& value_rule,
+    const SchemaSpecPtr& value_schema,
+    const std::string& rule_name,
+    int64_t idx
 ) {
   if (nested_object_level_ <= 1) {
     std::string whitespace = GetWhitespacePattern();
+    std::string formatted_value = FormatPropertyValue(value_rule, value_schema);
     if (!xml_wrapper_.value_wrapper_prefix.empty()) {
       return "\"" + xml_wrapper_.key_wrapper_prefix + key + xml_wrapper_.key_wrapper_suffix +
-             "\" " + whitespace + " \"" + xml_wrapper_.value_wrapper_prefix + "\" " + whitespace +
-             " " + value_rule + " " + whitespace + " \"" + xml_wrapper_.parameter_suffix + "\"";
+             "\" " + whitespace + " \"" + xml_wrapper_.value_wrapper_prefix + "\" " +
+             formatted_value + " \"" + xml_wrapper_.parameter_suffix + "\"";
     }
     return "\"" + xml_wrapper_.key_wrapper_prefix + key + xml_wrapper_.key_wrapper_suffix + "\" " +
-           whitespace + " " + value_rule + " " + whitespace + " \"" +
-           xml_wrapper_.parameter_suffix + "\"";
+           formatted_value + " \"" + xml_wrapper_.parameter_suffix + "\"";
   }
-  return JSONSchemaConverter::FormatProperty(key, value_rule, rule_name, idx);
+  return JSONSchemaConverter::FormatProperty(key, value_rule, value_schema, rule_name, idx);
+}
+
+std::string XMLToolCallingConverter::FormatPropertyValue(
+    const std::string& value_rule, const SchemaSpecPtr& value_schema
+) const {
+  if (const auto* string_spec = std::get_if<StringSpec>(&value_schema->spec)) {
+    if (!string_spec->pattern.has_value() && !string_spec->format.has_value() &&
+        string_spec->min_length == 0 && string_spec->max_length == -1) {
+      return value_rule;
+    }
+  }
+  std::string whitespace = GetWhitespacePattern();
+  return whitespace + " " + value_rule + " " + whitespace;
 }
 
 std::string XMLToolCallingConverter::FormatOtherProperty(
     const std::string& key_pattern,
     const std::string& value_rule,
+    const SchemaSpecPtr& value_schema,
     const std::string& rule_name,
     const std::string& rule_name_suffix
 ) {
   if (nested_object_level_ <= 1) {
     std::string whitespace = GetWhitespacePattern();
+    std::string formatted_value = FormatPropertyValue(value_rule, value_schema);
     if (!xml_wrapper_.value_wrapper_prefix.empty()) {
       return "\"" + xml_wrapper_.key_wrapper_prefix + "\" " + key_pattern + " \"" +
              xml_wrapper_.key_wrapper_suffix + "\" " + whitespace + " \"" +
-             xml_wrapper_.value_wrapper_prefix + "\" " + whitespace + " " + value_rule + " " +
-             whitespace + " \"" + xml_wrapper_.parameter_suffix + "\"";
+             xml_wrapper_.value_wrapper_prefix + "\" " + formatted_value + " \"" +
+             xml_wrapper_.parameter_suffix + "\"";
     }
     return "\"" + xml_wrapper_.key_wrapper_prefix + "\" " + key_pattern + " \"" +
-           xml_wrapper_.key_wrapper_suffix + "\" " + whitespace + " " + value_rule + " " +
-           whitespace + " \"" + xml_wrapper_.parameter_suffix + "\"";
+           xml_wrapper_.key_wrapper_suffix + "\" " + formatted_value + " \"" +
+           xml_wrapper_.parameter_suffix + "\"";
   }
   return JSONSchemaConverter::FormatOtherProperty(
-      key_pattern, value_rule, rule_name, rule_name_suffix
+      key_pattern, value_rule, value_schema, rule_name, rule_name_suffix
   );
 }
 

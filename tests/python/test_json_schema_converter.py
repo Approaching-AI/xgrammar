@@ -2195,23 +2195,11 @@ def test_generate_float_regex():
 def test_limited_whitespace_cnt():
     expected_grammar = r"""basic_escape ::= (([\"\\/bfnrt]) | ("u" [A-Fa-f0-9] [A-Fa-f0-9] [A-Fa-f0-9] [A-Fa-f0-9])) (=(basic_string_sub))
 basic_string_sub ::= (("\"") | ([^\0-\x1f\"\\\r\n] basic_string_sub) | ("\\" basic_escape basic_string_sub)) (=(basic_string_sub_4 [,}\]:]))
-basic_string ::= (("\"" basic_string_sub)) (=(root_16 "}"))
-root ::= (("{" root_7 "\"key\"" root_10 ":" root_13 basic_string root_16 "}"))
+basic_string ::= (("\"" basic_string_sub)) (=(basic_string_sub_4 "}"))
+root ::= (("{" basic_string_sub_4 "\"key\"" basic_string_sub_4 ":" basic_string_sub_4 basic_string basic_string_sub_4 "}"))
 basic_string_sub_2 ::= ("" | ([ \n\t] basic_string_sub_3))
 basic_string_sub_3 ::= ("" | ([ \n\t]))
 basic_string_sub_4 ::= ((basic_string_sub_2))
-root_5 ::= ("" | ([ \n\t] root_6))
-root_6 ::= ("" | ([ \n\t]))
-root_7 ::= ((root_5)) (=("\"key\"" root_10 ":" root_13 basic_string root_16 "}"))
-root_8 ::= ("" | ([ \n\t] root_9))
-root_9 ::= ("" | ([ \n\t]))
-root_10 ::= ((root_8)) (=(":" root_13 basic_string root_16 "}"))
-root_11 ::= ("" | ([ \n\t] root_12))
-root_12 ::= ("" | ([ \n\t]))
-root_13 ::= ((root_11)) (=(basic_string root_16 "}"))
-root_14 ::= ("" | ([ \n\t] root_15))
-root_15 ::= ("" | ([ \n\t]))
-root_16 ::= ((root_14)) (=("}"))
 """
     schema = {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}
     grammar = xgr.Grammar.from_json_schema(schema, any_whitespace=True, max_whitespace_cnt=2)
@@ -2227,23 +2215,11 @@ root_16 ::= ((root_14)) (=("}"))
 def test_limited_whitespace_compile():
     expected_grammar = r"""basic_escape ::= (([\"\\/bfnrt]) | ("u" [A-Fa-f0-9] [A-Fa-f0-9] [A-Fa-f0-9] [A-Fa-f0-9])) (=(basic_string_sub))
 basic_string_sub ::= (("\"") | ([^\0-\x1f\"\\\r\n] basic_string_sub) | ("\\" basic_escape basic_string_sub)) (=(basic_string_sub_4 [,}\]:]))
-basic_string ::= (("\"" basic_string_sub)) (=(root_16 "}"))
-root ::= (("{" root_7 "\"key\"" root_10 ":" root_13 basic_string root_16 "}"))
+basic_string ::= (("\"" basic_string_sub)) (=(basic_string_sub_4 "}"))
+root ::= (("{" basic_string_sub_4 "\"key\"" basic_string_sub_4 ":" basic_string_sub_4 basic_string basic_string_sub_4 "}"))
 basic_string_sub_2 ::= ("" | ([ \n\t] basic_string_sub_3))
 basic_string_sub_3 ::= ("" | ([ \n\t]))
 basic_string_sub_4 ::= ((basic_string_sub_2))
-root_5 ::= ("" | ([ \n\t] root_6))
-root_6 ::= ("" | ([ \n\t]))
-root_7 ::= ((root_5)) (=("\"key\"" root_10 ":" root_13 basic_string root_16 "}"))
-root_8 ::= ("" | ([ \n\t] root_9))
-root_9 ::= ("" | ([ \n\t]))
-root_10 ::= ((root_8)) (=(":" root_13 basic_string root_16 "}"))
-root_11 ::= ("" | ([ \n\t] root_12))
-root_12 ::= ("" | ([ \n\t]))
-root_13 ::= ((root_11)) (=(basic_string root_16 "}"))
-root_14 ::= ("" | ([ \n\t] root_15))
-root_15 ::= ("" | ([ \n\t]))
-root_16 ::= ((root_14)) (=("}"))
 """
     schema = {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}
     tokenizer_info = xgr.TokenizerInfo([])
@@ -2414,6 +2390,20 @@ def test_forward_slash_in_enum():
     assert _is_grammar_accept_string(grammar, '"a/b"')
     assert _is_grammar_accept_string(grammar, '"c/d/e"')
     assert not _is_grammar_accept_string(grammar, '"a\\/b"')
+
+
+def test_count_bounds_beyond_int32_are_safe():
+    with pytest.raises(RuntimeError, match="minLength must be an integer not exceeding"):
+        xgr.Grammar.from_json_schema({"type": "string", "minLength": 2**32})
+    with pytest.raises(RuntimeError, match="minItems and minContains must not exceed"):
+        xgr.Grammar.from_json_schema({"type": "array", "minItems": 2**32})
+
+    max_string = xgr.Grammar.from_json_schema({"type": "string", "maxLength": 2**32})
+    assert _is_grammar_accept_string(max_string, '"abc"')
+    max_array = xgr.Grammar.from_json_schema(
+        {"type": "array", "maxItems": 2**32}, strict_mode=False
+    )
+    assert _is_grammar_accept_string(max_array, "[1,2,3]")
 
 
 if __name__ == "__main__":
