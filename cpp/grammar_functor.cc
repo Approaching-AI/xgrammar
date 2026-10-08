@@ -2004,6 +2004,11 @@ class GrammarFSMHasherImpl {
   std::vector<std::vector<int32_t>> ref_graph_from_referee_to_referrer_;
   std::vector<std::vector<FSMEdge>> sorted_edges_;
   std::vector<bool> has_inward_edges_;
+  // Auxiliary offsets are storage locations, not token-edge semantics.
+  std::map<int32_t, std::vector<int32_t>> canonical_token_sets_;
+
+  uint64_t HashTerminalEdge(uint64_t seed, int32_t source, const FSMEdge& edge, int32_t target)
+      const;
 
   /*!
    * \brief Get the hash value of a fsm, with a given grammar.
@@ -2030,6 +2035,19 @@ class GrammarFSMHasherImpl {
 
   std::pair<bool, uint64_t> IsPartialHashable(int fsm_index);
 };
+
+uint64_t GrammarFSMHasherImpl::HashTerminalEdge(
+    uint64_t seed, int32_t source, const FSMEdge& edge, int32_t target
+) const {
+  if (edge.IsToken() || edge.IsExcludeToken()) {
+    const auto& ids = canonical_token_sets_.at(edge.GetAuxIndex());
+    seed = HashCombine(seed, source, edge.min, ids.size());
+    for (int32_t id : ids) HashCombineBinary(seed, id);
+    HashCombineBinary(seed, target);
+    return seed;
+  }
+  return HashCombine(seed, source, edge.min, edge.max, target);
+}
 
 bool GrammarFSMHasherImpl::FindSimpleCycle() {
   // Try to find a simple cycle.
@@ -2157,6 +2175,30 @@ void GrammarFSMHasherImpl::Apply(Grammar* grammar) {
 
   // Sort the edges.
   const auto& complete_fsm = grammar->ImplPtr()->complete_fsm;
+  canonical_token_sets_.clear();
+  for (int i = 0; i < complete_fsm.NumStates(); ++i) {
+    for (const auto& edge : complete_fsm.GetEdges(i)) {
+      if ((!edge.IsToken() && !edge.IsExcludeToken()) ||
+          canonical_token_sets_.count(edge.GetAuxIndex())) {
+        continue;
+      }
+      const int32_t* ids;
+      int32_t count;
+      if (edge.IsToken()) {
+        auto info = complete_fsm.GetTokenEdgeInfo(edge.GetAuxIndex());
+        ids = info.TokenIds();
+        count = info.Count();
+      } else {
+        auto info = complete_fsm.GetExcludeTokenEdgeInfo(edge.GetAuxIndex());
+        ids = info.TokenIds();
+        count = info.Count();
+      }
+      auto& canonical = canonical_token_sets_[edge.GetAuxIndex()];
+      canonical.assign(ids, ids + count);
+      std::sort(canonical.begin(), canonical.end());
+      canonical.erase(std::unique(canonical.begin(), canonical.end()), canonical.end());
+    }
+  }
   sorted_edges_.reserve(complete_fsm.NumStates());
   for (int i = 0; i < complete_fsm.NumStates(); i++) {
     const auto& edges = complete_fsm.GetEdges(i);
@@ -2165,7 +2207,20 @@ void GrammarFSMHasherImpl::Apply(Grammar* grammar) {
     for (const auto& edge : edges) {
       sorted_edges_.back().emplace_back(edge);
     }
-    std::sort(sorted_edges_.back().begin(), sorted_edges_.back().end());
+    std::sort(
+        sorted_edges_.back().begin(),
+        sorted_edges_.back().end(),
+        [this](const FSMEdge& lhs, const FSMEdge& rhs) {
+          if (lhs.min != rhs.min) return lhs.min < rhs.min;
+          if (lhs.IsToken() || lhs.IsExcludeToken()) {
+            const auto& left_ids = canonical_token_sets_.at(lhs.GetAuxIndex());
+            const auto& right_ids = canonical_token_sets_.at(rhs.GetAuxIndex());
+            if (left_ids != right_ids) return left_ids < right_ids;
+            return lhs.target < rhs.target;
+          }
+          return lhs < rhs;
+        }
+    );
   }
 
   // Disable non-fsms.
@@ -2314,13 +2369,7 @@ std::pair<bool, uint64_t> GrammarFSMHasherImpl::IsPartialHashable(int fsm_index)
       if (edge.IsRuleRef() || edge.IsRepeatRef()) {
         continue;
       }
-      hash_result = HashCombine(
-          hash_result,
-          current_new_state_id,
-          static_cast<int32_t>(edge.min),
-          static_cast<int32_t>(edge.max),
-          target_new_id
-      );
+      hash_result = HashTerminalEdge(hash_result, current_new_state_id, edge, target_new_id);
     }
   }
   std::vector<std::pair<int32_t, int32_t>> new_id_mapping;
@@ -2418,13 +2467,7 @@ uint64_t GrammarFSMHasherImpl::HashFsm(int fsm_index) {
       if (edge.IsRuleRef() || edge.IsRepeatRef()) {
         continue;
       }
-      hash_result = HashCombine(
-          hash_result,
-          current_new_state_id,
-          static_cast<int32_t>(edge.min),
-          static_cast<int32_t>(edge.max),
-          target_new_id
-      );
+      hash_result = HashTerminalEdge(hash_result, current_new_state_id, edge, target_new_id);
     }
   }
   std::vector<std::pair<int32_t, int32_t>> new_id_mapping;
