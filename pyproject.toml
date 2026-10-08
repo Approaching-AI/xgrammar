@@ -1,6 +1,6 @@
 [project]
 name = "xgrammar"
-version = "0.2.1+maxlength.20260907.minlength.20260909.fsm32.20260913.k3tokens.20260917.hardening.20260922"
+version = "0.2.1+maxlength.20260907.minlength.20260909.fsm32.20260913.k3tokens.20260917.hardening.20260922.tokenhash.1"
 description = "Efficient, Flexible and Portable Structured Generation"
 authors = [{ name = "MLC Team" }]
 readme = "README.md"

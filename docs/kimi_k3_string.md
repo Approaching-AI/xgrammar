@@ -76,3 +76,15 @@ including tokenizer compilation workers. Old compiled artifacts must be
 recompiled; both the package and serialization versions are bumped. Do not
 silently fall back to qwen_xml.
 CPU regression tests do not establish production GPU decode throughput.
+
+## Token-edge cache fix (tokenhash.1)
+
+Rule-level cache hashes include the actual normalized token sets for Token and
+ExcludeToken edges, not their auxiliary-storage offsets. This prevents two
+different protocol-token sequences from sharing incompatible masks. Both full
+and partial FSM hashes use the same token-edge hashing and semantic ordering.
+
+The package and serialization versions are bumped because previously compiled
+artifacts may contain incorrect masks. Restart compiler/matcher processes and
+recompile old artifacts when deploying; changing the hash cannot repair masks
+already held by a live matcher. The cache remains enabled.
