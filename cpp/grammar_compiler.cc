@@ -1080,11 +1080,12 @@ CompiledGrammar GrammarCompilerSub::MultiThreadCompileGrammar(Grammar grammar_un
   // TODO(Charlie): Figure out how to support ThreadPool and std::mutex in WebAssembly.
   // Only declare ThreadPool and mutex if max_threads > 1, so when max_threads = 1, we do
   // not need ThreadPool or std::mutex, which throws error in runtime in WebAssembly.
-  std::optional<ThreadPool> thread_pool;
+  // On unwinding, destroy the pool before the mutex that its tasks use.
   std::optional<std::mutex> adaptive_token_mask_cache_mutex;
+  std::optional<ThreadPool> thread_pool;
   if (max_threads_ > 1) {
-    thread_pool.emplace(max_threads_);
     adaptive_token_mask_cache_mutex.emplace();
+    thread_pool.emplace(max_threads_);
   }
 
   auto add_adaptive_token_mask = [&](const ParserState& state, bool is_root_rule) {

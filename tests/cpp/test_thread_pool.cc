@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
+#include <stdexcept>
 
 #include "support/thread_pool.h"
 using namespace xgrammar;
@@ -35,6 +37,37 @@ TEST(XGramamrThreadPoolTest, FunctionalTest) {
 
   // Wait for task to complete
   pool.Join();
+}
+
+TEST(XGrammarThreadPoolTest, JoinRethrowsAfterOtherTasksFinish) {
+  std::atomic<bool> finished{false};
+  ThreadPool pool(2);
+  pool.Execute([] { throw std::runtime_error("compile task failed"); });
+  pool.Execute([&] { finished = true; });
+  EXPECT_THROW(pool.Join(), std::runtime_error);
+  EXPECT_TRUE(finished);
+}
+
+TEST(XGrammarThreadPoolTest, WaitRethrowsAndPoolCanDoMoreWork) {
+  ThreadPool pool(2);
+  pool.Execute([] { throw std::runtime_error("compile task failed"); });
+  EXPECT_THROW(pool.Wait(), std::runtime_error);
+  EXPECT_EQ(pool.Submit([] { return 42; }).get(), 42);
+  EXPECT_NO_THROW(pool.Join());
+}
+
+TEST(XGrammarThreadPoolTest, UnwindingDrainsTasksWithoutReplacingCallerException) {
+  std::atomic<bool> finished{false};
+  EXPECT_THROW(
+      {
+        ThreadPool pool(2);
+        pool.Execute([] { throw std::runtime_error("compile task failed"); });
+        pool.Execute([&] { finished = true; });
+        throw std::logic_error("submission failed");
+      },
+      std::logic_error
+  );
+  EXPECT_TRUE(finished);
 }
 
 // TEST(XGramamrThreadPoolTest, PressureTest) {

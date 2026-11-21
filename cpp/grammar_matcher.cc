@@ -601,7 +601,6 @@ class BatchGrammarMatcher::Impl {
   );
 
  private:
-  std::optional<ThreadPool> thread_pool_ = std::nullopt;
   int32_t max_threads_ = 1;
 };
 
@@ -1237,12 +1236,7 @@ void BatchGrammarMatcher::Impl::BatchFillNextTokenBitmask(
   XGRAMMAR_CHECK(!indices.has_value() || indices->size() == matchers->size())
       << "The size of indices (" << (indices.has_value() ? indices->size() : 0)
       << ") should be the same as the size of matchers (" << matchers->size() << ").";
-  // Initialize the thread pool if needed. It should be initialized each time,
-  // because ThreadPool cannot be reused after Join().
-  if (max_threads_ > 1) {
-    thread_pool_.emplace(max_threads_);
-  }
-  if (!thread_pool_.has_value()) {
+  if (max_threads_ <= 1) {
     for (int i = 0; i < static_cast<int32_t>(matchers->size()); i++) {
       auto& matcher = (*matchers)[i];
       int index = indices.has_value() ? (*indices)[i] : i;
@@ -1260,10 +1254,11 @@ void BatchGrammarMatcher::Impl::BatchFillNextTokenBitmask(
           << ") for batch_id " << batch_id << ".";
       matcher->FillNextTokenBitmask(next_token_bitmask, index, debug_print);
     };
+    ThreadPool thread_pool(max_threads_);
     for (int i = 0; i < static_cast<int32_t>(matchers->size()); i++) {
-      thread_pool_->Execute([fill_next_token_mask, i]() { fill_next_token_mask(i); });
+      thread_pool.Execute([fill_next_token_mask, i]() { fill_next_token_mask(i); });
     }
-    thread_pool_->Join();
+    thread_pool.Join();
   }
 }
 
