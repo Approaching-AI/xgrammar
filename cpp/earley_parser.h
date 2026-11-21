@@ -62,7 +62,8 @@ struct ParserState {
    * \brief A sequence_id value of kUnexpandedRuleStartSequenceId means a rule hasn't been
    * expanded.
    */
-  static constexpr int32_t kUnexpandedRuleStartSequenceId = 128000;
+  // Grammar expressions use non-negative IDs. Keep this distinct from the invalid ID (-1).
+  static constexpr int32_t kUnexpandedRuleStartSequenceId = -2;
 
   /*!
    * \brief A parent_id value of kNoParent means this ParserState is the root of the parsing stack.
