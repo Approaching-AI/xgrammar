@@ -112,6 +112,51 @@ def test_masks_accept_rollback_and_close_branch():
     assert matcher.is_completed()
 
 
+def test_bounded_raw_mask_with_multi_byte_tokens_and_fork():
+    extra_tokens = [
+        b"ab",
+        b"abc",
+        b"abcd",
+        b"<|close|>argument<|sep|>",
+        "你好".encode(),
+        b"\xe4\xbd",
+        b"\xa0a",
+        b"\x80",
+        b"ab",
+    ]
+    vocab = VOCAB + extra_tokens
+    info = xgr.TokenizerInfo(vocab, stop_token_ids=[256])
+    compiled = xgr.GrammarCompiler(info).compile_structural_tag(
+        tag({"type": "string", "minLength": 2, "maxLength": 3})
+    )
+    compiled = xgr.CompiledGrammar.deserialize_json(compiled.serialize_json(), info)
+    matcher = xgr.GrammarMatcher(compiled)
+    mask = xgr.allocate_token_bitmask(1, len(vocab))
+
+    def verify(m):
+        m.fill_next_token_bitmask(mask)
+        for token in range(len(vocab)):
+            allowed = bool((int(mask[0, token // 32]) >> (token % 32)) & 1)
+            accepted = m.accept_token(token)
+            if accepted:
+                m.rollback(1)
+            assert allowed == accepted, token
+
+    for token in PREFIX:
+        assert matcher.accept_token(token)
+    verify(matcher)
+    fork = matcher.fork()
+    assert matcher.accept_token(len(VOCAB) + 5)  # In the middle of a Unicode character.
+    verify(matcher)
+    assert matcher.accept_token(len(VOCAB) + 6)  # Finish it, then emit ASCII.
+    verify(matcher)
+    assert matcher.accept_token(ord("b"))  # Exactly at the maximum.
+    verify(matcher)
+    matcher.rollback(3)
+    verify(matcher)
+    verify(fork)
+
+
 def test_no_control_bypass_through_any_tokens():
     payload = {
         "type": "structural_tag",
