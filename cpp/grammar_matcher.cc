@@ -10,7 +10,6 @@
 #include <xgrammar/matcher.h>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -551,14 +550,6 @@ class GrammarMatcher::Impl : public EarleyParser {
            state.repeat_count < rule.min_chars;
   }
 
-  // One entry per matcher: speculative rows usually revisit the same string
-  // state. This is an immutable byte-path witness, not a cached Earley result;
-  // it does not depend on the consumed length, parent, or rollback history.
-  const DynamicBitset* GetInRuleTokenMask(const ParserState& state);
-  int in_rule_mask_rule_ = -1;
-  int in_rule_mask_element_ = -1;
-  std::shared_ptr<const DynamicBitset> in_rule_token_mask_;
-
   // Temporary data for FillNextTokenBitmask. They are stored here to avoid repeated allocation.
   DynamicBitset tmp_accepted_bitset_;
   std::vector<int32_t> tmp_rejected_indices_;
@@ -847,70 +838,6 @@ bool GrammarMatcher::Impl::IsTokenBitmaskAllTrue(int32_t* bitmask_data_ptr) {
   return next_token_bitset.All();
 }
 
-const DynamicBitset* GrammarMatcher::Impl::GetInRuleTokenMask(const ParserState& state) {
-  if (in_rule_mask_rule_ == state.rule_id && in_rule_mask_element_ == state.element_id) {
-    return in_rule_token_mask_.get();
-  }
-  in_rule_mask_rule_ = state.rule_id;
-  in_rule_mask_element_ = state.element_id;
-  in_rule_token_mask_.reset();
-  // Only specialize the raw string shape used by atomic-token K3 grammars.
-  // Other strings (e.g. JSON escaping and quoted delimiters) retain replay.
-  if (grammar_->atomic_token_ids.empty()) return nullptr;
-  const auto& rule = grammar_->GetRule(state.rule_id);
-  auto expr = grammar_->GetGrammarExpr(rule.body_expr_id);
-  while ((expr.type == GrammarExprType::kChoices || expr.type == GrammarExprType::kSequence) &&
-         expr.size() == 1) {
-    expr = grammar_->GetGrammarExpr(expr[0]);
-  }
-  if (expr.type != GrammarExprType::kCharacterClassStar || expr.size() != 1 || expr[0] != 1) {
-    return nullptr;
-  }
-
-  // A path over this small deterministic, character-only FSM witnesses
-  // acceptance without completing the rule into a parent. Include states in
-  // the middle of a UTF-8 character: tokens can split that character.
-  constexpr int kMaxLocalStates = 16;
-  std::array<int, kMaxLocalStates> states;
-  std::array<std::array<int8_t, 256>, kMaxLocalStates> next;
-  const auto& fsm = grammar_->per_rule_fsms[state.rule_id].value().GetFsm().GetFsm();
-  int count = 1;
-  states[0] = state.element_id;
-  for (int i = 0; i < count; ++i) {
-    next[i].fill(-1);
-    auto edges = fsm.GetEdges(states[i]);
-    if (edges.size() == 0) return nullptr;
-    for (const auto& edge : edges) {
-      if (!edge.IsCharRange() || edge.max > 255 || edge.target < 0 ||
-          edge.target >= fsm.NumStates()) {
-        return nullptr;
-      }
-      auto it = std::find(states.begin(), states.begin() + count, edge.target);
-      if (it == states.begin() + count) {
-        if (count == kMaxLocalStates) return nullptr;
-        states[count++] = edge.target;
-      }
-      const int target = it - states.begin();
-      for (int ch = edge.min; ch <= edge.max; ++ch) {
-        if (next[i][ch] >= 0 && next[i][ch] != target) return nullptr;
-        next[i][ch] = target;
-      }
-    }
-  }
-
-  auto mask = std::make_shared<DynamicBitset>(tokenizer_info_.GetVocabSize());
-  for (const auto& [id, token] : tokenizer_info_.GetSortedDecodedVocab()) {
-    int cursor = 0;
-    for (unsigned char ch : token) {
-      cursor = next[cursor][ch];
-      if (cursor < 0) break;
-    }
-    if (cursor >= 0) mask->Set(id);
-  }
-  in_rule_token_mask_ = std::move(mask);
-  return in_rule_token_mask_.get();
-}
-
 bool GrammarMatcher::Impl::FillNextTokenBitmask(
     DLTensor* next_token_bitmask, int index, bool debug_print
 ) {
@@ -971,7 +898,8 @@ bool GrammarMatcher::Impl::FillNextTokenBitmask(
       const auto& budget_rule = grammar_->GetRule(state.rule_id);
       int remaining = budget_rule.max_chars - state.repeat_count;
       const bool min_satisfied = state.repeat_count >= budget_rule.min_chars;
-      const auto* in_rule_tokens = min_satisfied ? nullptr : GetInRuleTokenMask(state);
+      const auto* in_rule_tokens =
+          min_satisfied ? nullptr : compiled_grammar_->GetInRuleTokenMask(state);
       for (size_t token_index = 0; token_index < sorted_decoded_vocab.size(); ++token_index) {
         const auto& [token_id, token] = sorted_decoded_vocab[token_index];
         auto contains = [token_index](const std::vector<int32_t>& indices, size_t& cursor) {

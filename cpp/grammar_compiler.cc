@@ -1141,6 +1141,7 @@ CompiledGrammar GrammarCompilerSub::MultiThreadCompileGrammar(Grammar grammar_un
     thread_pool->Join();
   }
 
+  compiled_grammar_impl->BuildInRuleTokenMasks();
   return CompiledGrammar(compiled_grammar_impl);
 }
 

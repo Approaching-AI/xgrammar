@@ -16,7 +16,7 @@ INFO = xgr.TokenizerInfo(VOCAB, stop_token_ids=[256])
 OPEN, CLOSE, SEP = 257, 258, 259
 
 
-def tag(schema):
+def tag(schema, *, style="kimi_k3_string"):
     return StructuralTag(
         atomic_token_ranges=[("[BOS]", "[PAD]")],
         format=SequenceFormat(
@@ -24,7 +24,7 @@ def tag(schema):
                 TokenFormat(token="<|open|>"),
                 ConstStringFormat(value='argument key="v" type="string"'),
                 TokenFormat(token="<|sep|>"),
-                JSONSchemaFormat(json_schema=schema, style="kimi_k3_string"),
+                JSONSchemaFormat(json_schema=schema, style=style),
                 TokenFormat(token="<|close|>"),
                 ConstStringFormat(value="argument"),
                 TokenFormat(token="<|sep|>"),
@@ -155,6 +155,74 @@ def test_bounded_raw_mask_with_multi_byte_tokens_and_fork():
     matcher.rollback(3)
     verify(matcher)
     verify(fork)
+
+
+@pytest.mark.parametrize("roundtrip", [False, True])
+def test_nested_bounded_string_mask_matches_exact_acceptance(roundtrip):
+    extra = [
+        b"abc",
+        b"abcd",
+        b'"}]',
+        b'a"}]',
+        b'":"',
+        b'\\"',
+        "你好".encode(),
+        b"\xe4\xbd",
+        b"\xa0a",
+    ]
+    vocab = VOCAB + extra
+    info = xgr.TokenizerInfo(vocab, stop_token_ids=[256])
+    schema = {
+        "type": "array",
+        "maxItems": 3,
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"label": {"type": "string", "minLength": 1, "maxLength": 3}},
+            "required": ["label"],
+        },
+    }
+    compiled = xgr.GrammarCompiler(info, max_threads=2).compile_structural_tag(
+        tag(schema, style="json")
+    )
+    if roundtrip:
+        compiled = xgr.CompiledGrammar.deserialize_json(compiled.serialize_json(), info)
+
+    matcher = xgr.GrammarMatcher(compiled)
+    mask = xgr.allocate_token_bitmask(1, len(vocab))
+
+    def verify(m):
+        m.fill_next_token_bitmask(mask)
+        for token in range(len(vocab)):
+            allowed = bool((int(mask[0, token // 32]) >> (token % 32)) & 1)
+            accepted = m.accept_token(token)
+            if accepted:
+                m.rollback(1)
+            assert allowed == accepted, token
+
+    for token in PREFIX + list(b'[{"label'):
+        assert matcher.accept_token(token)
+    verify(matcher)
+    assert matcher.accept_token(len(VOCAB) + 4)  # Cross into the string in one token.
+    verify(matcher)
+    assert not matcher.accept_token(len(VOCAB) + 2)  # Still below minLength.
+    assert not matcher.accept_token(len(VOCAB) + 1)  # Would exceed maxLength.
+    fork = matcher.fork()
+    assert matcher.accept_token(len(VOCAB) + 7)  # Start a split UTF-8 character.
+    verify(matcher)
+    assert matcher.accept_token(len(VOCAB) + 8)  # Complete it and append ASCII.
+    verify(matcher)
+    assert matcher.accept_token(ord("b"))  # Exactly at maxLength.
+    verify(matcher)
+    assert not matcher.accept_token(len(VOCAB) + 3)  # Cannot add a character and exit.
+    assert matcher.accept_token(len(VOCAB) + 2)  # Can exit directly.
+    matcher.rollback(4)
+    verify(matcher)
+    verify(fork)
+    assert fork.accept_token(len(VOCAB) + 3)  # Minimum satisfied inside the same token.
+    for token in SUFFIX:
+        assert fork.accept_token(token)
+    assert fork.is_completed()
 
 
 def test_no_control_bypass_through_any_tokens():

@@ -5,6 +5,10 @@
 
 #include <xgrammar/compiler.h>
 
+#include <algorithm>
+#include <array>
+#include <map>
+
 #include "compiled_grammar_impl.h"
 #include "support/json_serializer.h"
 #include "testing.h"
@@ -164,6 +168,93 @@ std::string AdaptiveTokenMask::Print(const TokenizerInfo& tokenizer_info) const 
 
 /************** CompiledGrammar::Impl **************/
 
+namespace {
+
+using ByteTransitions = std::vector<std::array<int8_t, 256>>;
+
+// Number the reachable nodes from the candidate start so that equivalent
+// character rules can share one vocabulary scan and one stored bitset.
+ByteTransitions GetInRuleTransitions(const Grammar& grammar, const ParserState& state) {
+  const auto& rule = grammar->GetRule(state.rule_id);
+  if (rule.max_chars < 0 || rule.min_chars == 0) return {};
+  using GrammarExprType = Grammar::Impl::GrammarExprType;
+  auto expr = grammar->GetGrammarExpr(rule.body_expr_id);
+  while ((expr.type == GrammarExprType::kChoices || expr.type == GrammarExprType::kSequence) &&
+         expr.size() == 1) {
+    expr = grammar->GetGrammarExpr(expr[0]);
+  }
+  // Only handle a single negative terminal character star: both raw K3
+  // arguments and the quoted JSON body (which excludes quote and backslash).
+  // Other rule shapes continue to use the exact matcher.
+  if (expr.type != GrammarExprType::kCharacterClassStar || expr.size() == 0 || expr[0] != 1) {
+    return {};
+  }
+
+  constexpr int kMaxLocalStates = 16;
+  std::array<int, kMaxLocalStates> states;
+  ByteTransitions next;
+  next.reserve(kMaxLocalStates);
+  const auto& fsm = grammar->per_rule_fsms[state.rule_id].value().GetFsm().GetFsm();
+  int count = 1;
+  states[0] = state.element_id;
+  for (int i = 0; i < count; ++i) {
+    auto& row = next.emplace_back();
+    row.fill(-1);
+    auto edges = fsm.GetEdges(states[i]);
+    if (edges.size() == 0) return {};
+    for (const auto& edge : edges) {
+      if (!edge.IsCharRange() || edge.max > 255 || edge.target < 0 ||
+          edge.target >= fsm.NumStates()) {
+        return {};
+      }
+      auto it = std::find(states.begin(), states.begin() + count, edge.target);
+      if (it == states.begin() + count) {
+        if (count == kMaxLocalStates) return {};
+        states[count++] = edge.target;
+      }
+      const int target = it - states.begin();
+      for (int ch = edge.min; ch <= edge.max; ++ch) {
+        if (row[ch] >= 0 && row[ch] != target) return {};
+        row[ch] = target;
+      }
+    }
+  }
+  return next;
+}
+
+}  // namespace
+
+void CompiledGrammar::Impl::BuildInRuleTokenMasks() {
+  // Scope the optimization to K3-style atomic grammars. Do not store the
+  // derivative in serialized artifacts or invalidate existing artifacts.
+  if (grammar->atomic_token_ids.empty()) return;
+  std::map<ByteTransitions, std::size_t> layouts;
+  for (const auto& entry : adaptive_token_mask_cache) {
+    const auto& state = entry.first;
+    auto transitions = GetInRuleTransitions(grammar, state);
+    if (transitions.empty()) continue;
+    auto [it, inserted] = layouts.try_emplace(std::move(transitions), in_rule_masks_.size());
+    if (inserted) {
+      auto& mask = in_rule_masks_.emplace_back(tokenizer_info.GetVocabSize());
+      const auto& next = it->first;
+      for (const auto& [token_id, token] : tokenizer_info.GetSortedDecodedVocab()) {
+        int cursor = 0;
+        for (unsigned char ch : token) {
+          cursor = next[cursor][ch];
+          if (cursor < 0) break;
+        }
+        if (cursor >= 0) mask.Set(token_id);
+      }
+    }
+    in_rule_mask_indices_.emplace(state, it->second);
+  }
+}
+
+const DynamicBitset* CompiledGrammar::Impl::GetInRuleTokenMask(const ParserState& state) const {
+  auto it = in_rule_mask_indices_.find(state);
+  return it == in_rule_mask_indices_.end() ? nullptr : &in_rule_masks_[it->second];
+}
+
 picojson::value SerializeJSONValue(const CompiledGrammar::Impl& impl) {
   auto result = picojson::object{};
   result["grammar"] = AutoSerializeJSONValue(impl.grammar);
@@ -200,13 +291,15 @@ std::optional<SerializationError> DeserializeJSONValue(
     return ConstructDeserializeError("Expect a 'adaptive_token_mask_cache' field", type_name);
   }
   AutoDeserializeJSONValue(&(impl->adaptive_token_mask_cache), object["adaptive_token_mask_cache"]);
+  impl->BuildInRuleTokenMasks();
   return std::nullopt;
 }
 
 /************** CompiledGrammar **************/
 
 std::size_t MemorySize(const CompiledGrammar::Impl& impl) {
-  return MemorySize(impl.grammar) + MemorySize(impl.adaptive_token_mask_cache);
+  return MemorySize(impl.grammar) + MemorySize(impl.adaptive_token_mask_cache) +
+         MemorySize(impl.in_rule_mask_indices_) + MemorySize(impl.in_rule_masks_);
 }
 
 std::size_t CompiledGrammar::MemorySizeBytes() const { return MemorySize(*pimpl_); }

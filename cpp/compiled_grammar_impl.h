@@ -118,6 +118,13 @@ class CompiledGrammar::Impl {
   /*! \brief Mapping from the parser state to the adaptive token mask. */
   std::unordered_map<ParserState, AdaptiveTokenMask, StateHashForCache> adaptive_token_mask_cache;
 
+  // Derived from the grammar and vocabulary on compile/deserialization. A bit
+  // proves that all bytes of a token can be consumed inside this budget rule.
+  // Unlike a full parser-state mask, the proof does not depend on the parent
+  // state or on how much of the character budget has been consumed.
+  void BuildInRuleTokenMasks();
+  const DynamicBitset* GetInRuleTokenMask(const ParserState& state) const;
+
   Grammar GetGrammar() const { return grammar; }
 
   TokenizerInfo GetTokenizerInfo() const { return tokenizer_info; }
@@ -130,6 +137,10 @@ class CompiledGrammar::Impl {
       const TokenizerInfo& tokenizer_info
   );
   friend std::size_t MemorySize(const Impl& impl);
+
+ private:
+  std::unordered_map<ParserState, std::size_t, StateHashForCache> in_rule_mask_indices_;
+  std::vector<DynamicBitset> in_rule_masks_;
 };
 
 XGRAMMAR_MEMBER_TABLE(
